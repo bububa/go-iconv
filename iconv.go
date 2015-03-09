@@ -2,7 +2,7 @@
 // between different character sets
 package iconv
 
-// #cgo darwin LDFLAGS: -liconv
+// #cgo LDFLAGS: -liconv
 // #include <iconv.h>
 // #include <errno.h>
 import "C"
