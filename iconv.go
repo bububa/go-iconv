@@ -3,8 +3,17 @@
 package iconv
 
 // #cgo LDFLAGS: -liconv
+// #include <stdlib.h>
 // #include <iconv.h>
 // #include <errno.h>
+/*
+// Used to fix GO1.6 cgo panic: cgo argument has Go pointer to Go pointer.
+size_t iconv_custom(iconv_t cd,
+                    char *inbuf, size_t *inbytesleft,
+                    char *outbuf, size_t *outbytesleft) {
+	return iconv(cd, &inbuf, inbytesleft, &outbuf, outbytesleft);
+}
+*/
 import "C"
 
 import (
@@ -22,13 +31,21 @@ type Iconv struct {
 
 // Create a codec which convert a string encoded in fromcode into a string
 // encoded in tocode
-// 
-// If you add //TRANSLIT at the end of tocode, any character which doesn't 
+//
+// If you add //TRANSLIT at the end of tocode, any character which doesn't
 // exists in the destination charset will be replaced by its closest
 // equivalent (for example, € will be represented by EUR in ASCII). Else,
 // such a character will trigger an error.
 func Open(tocode string, fromcode string) (*Iconv, error) {
-	ret, err := C.iconv_open(C.CString(tocode), C.CString(fromcode))
+	tocodeC := C.CString(tocode)
+	fromcodeC := C.CString(fromcode)
+	defer func() {
+		// free the C Strings
+		C.free(unsafe.Pointer(tocodeC))
+		C.free(unsafe.Pointer(fromcodeC))
+	}()
+
+	ret, err := C.iconv_open(tocodeC, fromcodeC)
 	if err != nil {
 		return nil, err
 	}
@@ -57,12 +74,17 @@ func (cd *Iconv) Conv(input string) (result string, err error) {
 	for inbytes > 0 {
 		outbytes := C.size_t(len(outbuf))
 		outptr := &outbuf[0]
-		_, err = C.iconv(cd.pointer,
-			(**C.char)(unsafe.Pointer(&inptr)), &inbytes,
-			(**C.char)(unsafe.Pointer(&outptr)), &outbytes)
+		inbytes_orig := inbytes
+		_, err = C.iconv_custom(cd.pointer,
+			(*C.char)(unsafe.Pointer(inptr)), &inbytes,
+			(*C.char)(unsafe.Pointer(outptr)), &outbytes)
 		buf.Write(outbuf[:len(outbuf)-int(outbytes)])
 		if err != nil && err != syscall.E2BIG {
 			return buf.String(), err
+		}
+
+		if inbytes > 0 {
+			inptr = &inbuf[inbytes_orig-inbytes]
 		}
 	}
 
